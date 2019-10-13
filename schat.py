@@ -71,9 +71,11 @@ def handle(conn, addr):
 
         if command == "announce":
             online_users[name] = ipv4_address
-            conn.sendall(f"[{schat_username}, {host_ipv4_address}, response]".encode("ascii"))
+            threading.Thread(target=response, args=(ipv4_address,)).start()
+            print(f"{name} is online!")
         elif command == "response":
             online_users[name] = ipv4_address
+            print(f"{name} is online!")
     else:
         command = package[second_seperator_index + 2: third_seperator_index]
         if command == "message":
@@ -97,9 +99,21 @@ def announce(target_ipv4_address):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(1)
         try:
-            print(target_ipv4_address)
             s.connect((target_ipv4_address, int(schat_port)))
             package = f"[{schat_username}, {host_ipv4_address}, announce]"
+            s.sendall(package.encode("ascii"))
+        except socket.timeout:
+            pass
+        except socket.error:
+            pass
+
+
+def response(target_ipv4_address):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        try:
+            s.connect((target_ipv4_address, int(schat_port)))
+            package = f"[{schat_username}, {host_ipv4_address}, response]"
             s.sendall(package.encode("ascii"))
         except socket.timeout:
             pass
