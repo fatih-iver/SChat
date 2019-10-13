@@ -1,19 +1,25 @@
 import socket
-import os
 import sys
 import threading
+import datetime
+
+seperator = ","
 
 print("Welcome to SChat!")
 
-# schat_username = input("Choose a username: ")
-schat_username = "fiver"
-os.environ["SCHAT_USERNAME"] = schat_username
+online_users = {}
+
+schat_username = input("Choose a username: ")
+
+print("SCHAT_USERNAME", schat_username)
 
 
 def get_host_ip_address():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     s.connect(("8.8.8.8", 80))
-    return s.getsockname()[0]
+    host_ip_address = s.getsockname()[0]
+    s.close()
+    return host_ip_address
 
 
 host_ip_address = get_host_ip_address()
@@ -35,41 +41,109 @@ host_ipv4_address = host_ip_address
 
 print("HOST_IPV4_ADDRESS", host_ipv4_address)
 
-os.environ["SCHAT_IPV4_ADDRESS"] = host_ipv4_address
-
 schat_port = 12345
 
-os.environ["SCHAT_PORT"] = str(schat_port)
+
+def handle(conn, addr):
+    package = ""
+    while True:
+        data = conn.recv(1024).decode("ascii")
+        if not data:
+            break
+        package += data
+
+    if not package:
+        conn.close()
+        return
+
+    first_seperator_index = package.find(seperator)
+
+    name = package[1: first_seperator_index]
+
+    second_seperator_index = package.find(seperator, first_seperator_index + 1)
+
+    ipv4_address = package[first_seperator_index + 2: second_seperator_index]
+
+    third_seperator_index = package.find(seperator, second_seperator_index + 2)
+
+    if third_seperator_index == -1:
+        command = package[second_seperator_index + 2: -1]
+
+        if command == "announce":
+            online_users[name] = ipv4_address
+            conn.sendall(f"[{schat_username}, {host_ipv4_address}, response]".encode("ascii"))
+        elif command == "response":
+            online_users[name] = ipv4_address
+    else:
+        command = package[second_seperator_index + 2: third_seperator_index]
+        if command == "message":
+            message = package[third_seperator_index + 2: -1]
+            print(f"{name}:{message}")
+    conn.close()
 
 
-def handle_connection(conn, addr):
-    with conn:
-        print('Connected by', addr)
-        while True:
-            data = conn.recv(1024).decode("ascii")
-            if not data:
-                break
-            conn.sendall(data.encode("ascii"))
-
-
-def start_listening(host_ipv4_address, schat_port):
+def listen():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((host_ipv4_address, schat_port))
-        s.listen()
+        s.listen(10)
         while True:
             conn, addr = s.accept()
-            threading.Thread(target=handle_connection, args=(conn, addr)).start()
+            threading.Thread(target=handle, args=(conn, addr)).start()
 
 
-threading.Thread(target=start_listening, args=(host_ipv4_address, schat_port)).start()
+threading.Thread(target=listen).start()
 
 
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.connect((host_ipv4_address, schat_port))
-    while True:
-        message = input(":")
-        if message == "exit":
-            break
-        s.sendall(message.encode("ascii"))
-        data = s.recv(1024).decode("ascii")
-        print('Received', repr(data))
+def announce():
+    host_ipv4_network_address = host_ipv4_address[:host_ipv4_address.rfind(".") + 1]
+    host_identifier = int(host_ipv4_address[host_ipv4_address.rfind(".") + 1:])
+
+    for i in range(10):
+        if i == host_identifier:
+            continue
+        target_ipv4_address = host_ipv4_network_address + str(i)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(1)
+            try:
+                s.connect((target_ipv4_address, int(schat_port)))
+                package = f"[{schat_username}, {host_ipv4_address}, announce]"
+                s.sendall(package.encode("ascii"))
+            except socket.timeout:
+                continue
+            except socket.error:
+                continue
+
+
+threading.Thread(target=announce).start()
+
+last_announcement_time = datetime.datetime.now()
+
+print("announce/online/message/exit")
+
+while True:
+    command = input().strip()
+
+    if command == "exit":
+        sys.exit()
+    elif command == "announce":
+        if datetime.datetime.now() - last_announcement_time > datetime.timedelta(minutes=1):
+            last_announcement_time = datetime.datetime.now()
+            threading.Thread(target=announce).start()
+        else:
+            print("Rate Limited!")
+    elif command == "online":
+        print(online_users)
+    elif command.startswith("message"):
+        first_seperator_index = command.find(" ")
+        second_seperator_index = command.find(" ", first_seperator_index + 1)
+        target_username = command[first_seperator_index + 1: second_seperator_index]
+        message = command[second_seperator_index + 1:]
+
+        if target_username in online_users:
+            target_ipv4_address = online_users[target_username]
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect((target_ipv4_address, schat_port))
+                package = f"[{schat_username}, {host_ipv4_address}, message, {message}]"
+                s.sendall(package.encode("ascii"))
+        else:
+            print("No such user exists!")
