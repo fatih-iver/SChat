@@ -93,28 +93,32 @@ def listen():
 
 threading.Thread(target=listen).start()
 
+def announce(target_ipv4_address):
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(1)
+        try:
+            print(target_ipv4_address)
+            s.connect((target_ipv4_address, int(schat_port)))
+            package = f"[{schat_username}, {host_ipv4_address}, announce]"
+            s.sendall(package.encode("ascii"))
+        except socket.timeout:
+            pass
+        except socket.error:
+            pass
 
-def announce():
+
+def announce_all():
     host_ipv4_network_address = host_ipv4_address[:host_ipv4_address.rfind(".") + 1]
     host_identifier = int(host_ipv4_address[host_ipv4_address.rfind(".") + 1:])
 
-    for i in range(10):
+    for i in range(254):
         if i == host_identifier:
             continue
         target_ipv4_address = host_ipv4_network_address + str(i)
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(1)
-            try:
-                s.connect((target_ipv4_address, int(schat_port)))
-                package = f"[{schat_username}, {host_ipv4_address}, announce]"
-                s.sendall(package.encode("ascii"))
-            except socket.timeout:
-                continue
-            except socket.error:
-                continue
+        threading.Thread(target=announce, args=(target_ipv4_address,)).start()
 
 
-threading.Thread(target=announce).start()
+threading.Thread(target=announce_all).start()
 
 last_announcement_time = datetime.datetime.now()
 
@@ -128,7 +132,7 @@ while True:
     elif command == "announce":
         if datetime.datetime.now() - last_announcement_time > datetime.timedelta(minutes=1):
             last_announcement_time = datetime.datetime.now()
-            threading.Thread(target=announce).start()
+            threading.Thread(target=announce_all).start()
         else:
             print("Rate Limited!")
     elif command == "online":
